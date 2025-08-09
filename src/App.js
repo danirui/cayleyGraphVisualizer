@@ -20,36 +20,31 @@ import { Matrix4, Quaternion, Vector3 } from "three";
 // ---------------------------------------------------------------------------
 
 function idPermutation(n) {
-  // return identity permutation of size n as array [0,1,...,n-1]
   return Array.from({ length: n }, (_, i) => i);
 }
 
-// parseCycleNotation: convert cycle string like "(1 2)(3 4)" into 0-based perm
-// - we deliberately avoid complex regex so the canvas updater doesn't trip on
-//   escaping. The parser accepts commas or spaces as separators inside cycles.
 function parseCycleNotation(cycleStr, n) {
-  const perm = idPermutation(n).slice(); // copy
+  const perm = idPermutation(n).slice();
   if (!cycleStr) return perm;
   let idx = 0;
   while (true) {
     const l = cycleStr.indexOf("(", idx);
     if (l === -1) break;
     const r = cycleStr.indexOf(")", l + 1);
-    if (r === -1) break; // unmatched '(', stop
+    if (r === -1) break;
     let inner = cycleStr.slice(l + 1, r).trim();
-    // normalize separators: convert commas to spaces and remove double spaces
     while (inner.indexOf(",") !== -1) inner = inner.replace(",", " ");
     while (inner.indexOf("  ") !== -1) inner = inner.replace("  ", " ");
     const parts = inner.length ? inner.split(" ") : [];
-    // convert to 0-based ints
-    const nums = parts.map((s) => {
-      const t = s.trim();
-      if (t === "") return NaN;
-      const v = parseInt(t, 10);
-      if (isNaN(v)) return NaN;
-      return v - 1; // convert to 0-based
-    }).filter((x) => !isNaN(x));
-    // apply cycle: a -> b for successive entries
+    const nums = parts
+      .map((s) => {
+        const t = s.trim();
+        if (t === "") return NaN;
+        const v = parseInt(t, 10);
+        if (isNaN(v)) return NaN;
+        return v - 1;
+      })
+      .filter((x) => !isNaN(x));
     for (let i = 0; i < nums.length; i++) {
       const a = nums[i];
       const b = nums[(i + 1) % nums.length];
@@ -61,8 +56,6 @@ function parseCycleNotation(cycleStr, n) {
 }
 
 function composePerm(a, b) {
-  // composition (a ∘ b)(i) = a[b[i]] with 0-based arrays. We treat
-  // generator lists as right-multipliers, consistent with the rest of the code.
   const n = a.length;
   const out = new Array(n);
   for (let i = 0; i < n; i++) out[i] = a[b[i]];
@@ -70,24 +63,24 @@ function composePerm(a, b) {
 }
 
 function permToKey(p) {
-  // Map-friendly string key for a permutation
   return p.join(",");
 }
 
 function permTo1basedString(p) {
-  // pretty bracket notation for UI, e.g. [12345]
   return "[" + p.map((x) => x + 1).join("") + "]";
 }
 
 function permToCycleString(p) {
-  // human-readable disjoint cycle notation (1-based inside)
   const n = p.length;
   const used = new Array(n).fill(false);
   const cycles = [];
   for (let i = 0; i < n; i++) {
     if (used[i]) continue;
     let cur = i;
-    if (p[cur] === cur) { used[cur] = true; continue; } // fixed point
+    if (p[cur] === cur) {
+      used[cur] = true;
+      continue;
+    }
     const cycle = [];
     while (!used[cur]) {
       used[cur] = true;
@@ -96,7 +89,7 @@ function permToCycleString(p) {
     }
     if (cycle.length > 0) cycles.push("(" + cycle.join(" ") + ")");
   }
-  if (cycles.length === 0) return "()"; // identity
+  if (cycles.length === 0) return "()";
   return cycles.join("");
 }
 
@@ -109,36 +102,27 @@ function permToCycleString(p) {
 // ---------------------------------------------------------------------------
 
 function generateGroup(n, generators) {
-  // id permutation
   const id = idPermutation(n);
   const idKey = permToKey(id);
-  const seen = new Map(); // key -> {perm, word}
+  const seen = new Map();
   const queue = [];
-
-  // start from identity, word []
   seen.set(idKey, { perm: id, word: [] });
   queue.push(id);
-
   while (queue.length) {
     const cur = queue.shift();
     const curKey = permToKey(cur);
     const curEntry = seen.get(curKey);
-    // for each generator g_i, compute next = cur ∘ g_i (right multiplication)
     for (let i = 0; i < generators.length; i++) {
       const g = generators[i];
       const next = composePerm(cur, g);
       const k = permToKey(next);
       if (!seen.has(k)) {
-        // word = parent's word concat [i]. This stores generator indices
-        // in application order. Later we display reversed to read algebraically.
         const wordArr = curEntry.word.concat([i]);
         seen.set(k, { perm: next, word: wordArr });
         queue.push(next);
       }
     }
   }
-
-  // convert map to stable sorted array for reproducible UI order
   const arr = Array.from(seen.values());
   arr.sort((A, B) => {
     const ka = permToKey(A.perm);
@@ -149,8 +133,6 @@ function generateGroup(n, generators) {
 }
 
 function buildCayley(n, generators) {
-  // Build nodes and directed edges for the Cayley graph. Each directed edge
-  // corresponds to right-multiplication by a generator: p --g--> p∘g.
   const nodeObjs = generateGroup(n, generators);
   const keyIndex = new Map(nodeObjs.map((o, i) => [permToKey(o.perm), i]));
   const edges = [];
@@ -159,7 +141,7 @@ function buildCayley(n, generators) {
     for (let gi = 0; gi < generators.length; gi++) {
       const next = composePerm(p, generators[gi]);
       const j = keyIndex.get(permToKey(next));
-      if (j === undefined) continue; // should not happen if group generation succeeded
+      if (j === undefined) continue;
       edges.push({ a: i, b: j, gen: gi });
     }
   }
@@ -168,15 +150,15 @@ function buildCayley(n, generators) {
 
 // ---------------------------------------------------------------------------
 // LAYOUT / PHYSICS
-// Simple explicit Euler integrator with spring forces along edges, pairwise
-// repulsion (optional, O(N^2)), damping and tiny stochastic jostling. Physics
-// writes to `positionsRef.current` which is read by the rendering code each
-// frame — this avoids React re-renders for each node.
+// Explicit integrator with spring forces along edges, pairwise repulsion,
+// damping and stochastic jostling. We implement per-generator tension sliders:
+// each generator i has a tension value T_i > 0. We translate 'tension' into an
+// edge equilibrium length by: ideal_len_edge = globalIdeal / T_i (so larger
+// tension -> shorter target length). The spring force uses springK as a global
+// multiplier, and generator-specific tension rescales the rest length.
 // ---------------------------------------------------------------------------
 
 function initPositions(count, radius = 4) {
-  // initialize positions roughly on a circle (3D perturbation) so the graph
-  // doesn't start as a singular pile. Returns an array of objects with x,y,z,vx,vy,vz.
   const arr = new Array(count);
   for (let i = 0; i < count; i++) {
     const theta = (2 * Math.PI * i) / Math.max(1, count);
@@ -192,22 +174,24 @@ function initPositions(count, radius = 4) {
   return arr;
 }
 
-function Physics({ positionsRef, edgesRef, pinnedRef, params }) {
-  // params: { springK, repulsionK, damping, jostle, running, enableRepulsion }
-  const { springK, repulsionK, damping, jostle, running, enableRepulsion } = params;
+function Physics({
+  positionsRef,
+  edgesRef,
+  pinnedRef,
+  params,
+  genTensionsRef,
+}) {
+  const { springK, repulsionK, damping, jostle, running, enableRepulsion } =
+    params;
   useFrame((state, delta) => {
-    // clamp dt to avoid instabilities on slow tabs
     const dt = Math.min(delta, 0.04);
-    if (!running) return; // allow pause
+    if (!running) return;
     const pos = positionsRef.current;
     if (!pos || pos.length === 0) return;
     const count = pos.length;
-    // heuristics: choose an "ideal" edge length roughly proportional to cube root
-    // of the node count so layouts scale reasonably with graph size.
-    const ideal = Math.max(1, Math.pow(Math.max(1, count), 1 / 3)) * 0.9;
-    const scale = dt * 60; // scale forces to feel similar across framerates
+    const idealBase = Math.max(1, Math.pow(Math.max(1, count), 1 / 3)) * 0.9;
+    const scale = dt * 60;
 
-    // small random jostle to escape degeneracies
     for (let i = 0; i < pos.length; i++) {
       if (pinnedRef.current && pinnedRef.current[i]) continue;
       pos[i].vx += (Math.random() * 2 - 1) * jostle * scale;
@@ -215,7 +199,6 @@ function Physics({ positionsRef, edgesRef, pinnedRef, params }) {
       pos[i].vz += (Math.random() * 2 - 1) * jostle * scale;
     }
 
-    // spring forces along edges (Hooke-like): F = k (dist - ideal) directed along edge
     const edges = edgesRef.current || [];
     for (let e = 0; e < edges.length; e++) {
       const ed = edges[e];
@@ -226,7 +209,14 @@ function Physics({ positionsRef, edgesRef, pinnedRef, params }) {
       const dy = b.y - a.y;
       const dz = b.z - a.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-6;
-      const f = springK * (dist - ideal);
+
+      // generator-specific tension: if undefined fallback 1. We interpret
+      // tensionValue > 0 where larger -> shorter target length.
+      const tvals = genTensionsRef.current || [];
+      const gT = Math.max(1e-3, tvals[ed.gen] || 1.0);
+      const effectiveIdeal = idealBase / gT;
+
+      const f = springK * (dist - effectiveIdeal);
       const fx = (f * dx) / dist;
       const fy = (f * dy) / dist;
       const fz = (f * dz) / dist;
@@ -242,7 +232,6 @@ function Physics({ positionsRef, edgesRef, pinnedRef, params }) {
       }
     }
 
-    // O(N^2) repulsion (disabled for very large graphs)
     if (enableRepulsion && pos.length <= 720) {
       for (let i = 0; i < pos.length; i++) {
         for (let j = i + 1; j < pos.length; j++) {
@@ -271,7 +260,6 @@ function Physics({ positionsRef, edgesRef, pinnedRef, params }) {
       }
     }
 
-    // integrate and apply damping
     for (let i = 0; i < pos.length; i++) {
       if (pinnedRef.current && pinnedRef.current[i]) continue;
       pos[i].x += pos[i].vx * dt;
@@ -283,10 +271,9 @@ function Physics({ positionsRef, edgesRef, pinnedRef, params }) {
       pos[i].vz *= dampFactor;
     }
   });
-  return null; // component does not render anything — it only updates positionsRef
+  return null;
 }
 
-// small camera tween when graph size changes so user doesn't have to manually zoom
 function AutoCamera({ count }) {
   const { camera } = useThree();
   useEffect(() => {
@@ -294,7 +281,7 @@ function AutoCamera({ count }) {
     const start = camera.position.z;
     const target = dist;
     let t = 0;
-    const dur = 20; // frames for the tween
+    const dur = 20;
     function step() {
       t++;
       const alpha = Math.min(1, t / dur);
@@ -307,62 +294,161 @@ function AutoCamera({ count }) {
 }
 
 // ---------------------------------------------------------------------------
-// RENDERING PRIMITIVES (INSTANCING)
-// Instanced meshes are used for node spheres and arrow cones so we draw many
-// objects with a single GPU draw call. We update instance matrices inside
-// useFrame() each animation frame based on positionsRef.current.
+// RENDERING (INSTANCING)
 // ---------------------------------------------------------------------------
 
-const PALETTE = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#a65628', '#f781bf', '#999999'];
+const PALETTE = [
+  "#e41a1c",
+  "#377eb8",
+  "#4daf4a",
+  "#984ea3",
+  "#ff7f00",
+  "#a65628",
+  "#f781bf",
+  "#999999",
+];
 
-function InstancedNodes({ positionsRef, count, onClickInstance, onHoverInstance, selectedIdRef, size = 0.14 }) {
-  // meshRef is the instancedMesh, dummyMat/q/p are temporary objects reused to
-  // avoid GC pressure inside the per-frame loop.
+const NODE_MODES = {
+  NORMAL: 0,
+  DRAG: 1,
+  PIN: 2,
+};
+
+const MODE_COLORS = {
+  normal: new THREE.Color("#aaaaaa"), // white-ish
+  drag: new THREE.Color("#FFD700"), // gold
+  pin: new THREE.Color("#000000"), // black
+};
+
+function InstancedNodes({
+  positionsRef,
+  count,
+  onClickInstance,
+  onHoverInstance,
+  onDragStart,
+  onDrag,
+  onDragEnd,
+  nodeModesRef,
+  size = 0.14,
+}) {
   const meshRef = useRef();
   const dummyMat = useMemo(() => new Matrix4(), []);
   const q = useMemo(() => new Quaternion(), []);
   const p = useMemo(() => new Vector3(), []);
 
+  // ensure instanceColor attribute is allocated
+  useEffect(() => {
+    if (!meshRef.current) return;
+    const mesh = meshRef.current;
+    if (!mesh.instanceColor) {
+      // create an InstancedBufferAttribute for colors (rgb per instance)
+      const colors = new Float32Array(count * 3);
+      const attr = new THREE.InstancedBufferAttribute(colors, 3);
+      mesh.geometry.setAttribute("instanceColor", attr);
+      mesh.instanceColor = attr;
+    }
+  }, [count]);
+
   useFrame(() => {
     const pos = positionsRef.current;
     if (!pos || !meshRef.current) return;
-    // write each instance transform from pos[i]
+    // update transforms
     for (let i = 0; i < pos.length; i++) {
       p.set(pos[i].x, pos[i].y, pos[i].z);
       dummyMat.compose(p, q, new Vector3(size, size, size));
       meshRef.current.setMatrixAt(i, dummyMat);
     }
     meshRef.current.instanceMatrix.needsUpdate = true;
+
+    // update per-instance colors from nodeModesRef
+    const modes = nodeModesRef.current || [];
+    if (meshRef.current.instanceColor) {
+      const arr = meshRef.current.instanceColor.array;
+      for (let i = 0; i < pos.length; i++) {
+        const m = modes[i] || "normal";
+        const c = MODE_COLORS[m] || MODE_COLORS.normal;
+        const base = i * 3;
+        arr[base + 0] = c.r;
+        arr[base + 1] = c.g;
+        arr[base + 2] = c.b;
+      }
+      meshRef.current.instanceColor.needsUpdate = true;
+    }
   });
 
-  // pointer events on instanced meshes provide an `instanceId` telling which
-  // instance was interacted with. We use that to pin/unpin nodes and to hover.
+  // pointer event helpers: react-three-fiber gives `e.point` as the 3d world
+  // coordinate of the intersection. We use pointerdown/move/up to implement
+  // dragging. Note: the onPointerMove here is called even when not dragging,
+  // so we only call onDrag if draggingId is set upstream.
+
   const handlePointerDown = (e) => {
+    e.stopPropagation();
     const id = e.instanceId;
-    if (id != null && onClickInstance) onClickInstance(id);
+    if (id == null) return;
+    // let parent decide what to do on click: cycle modes and possibly start
+    // drag. Provide the event point so parent can compute offsets.
+    if (onClickInstance) onClickInstance(id, e);
+    // also treat this as potential drag start
+    if (onDragStart) onDragStart(id, e.point, e);
   };
+
   const handlePointerMove = (e) => {
+    e.stopPropagation();
     const id = e.instanceId;
-    if (onHoverInstance) onHoverInstance(id);
+    if (id == null) {
+      // when pointer moved off an instance RTF still calls pointerMove on the
+      // mesh with instanceId undefined — in that case call onHoverInstance(null)
+      if (onHoverInstance) onHoverInstance(null);
+      return;
+    }
+    if (onHoverInstance) onHoverInstance(id, e);
+    // If parent says some node is currently being dragged it will call onDrag
+    // from its global pointermove (we also forward here to be safe)
+    if (onDrag) onDrag(id, e.point, e);
   };
-  const handlePointerOut = () => {
+
+  const handlePointerUp = (e) => {
+    e.stopPropagation();
+    const id = e.instanceId;
+    if (id == null) return;
+    if (onDragEnd) onDragEnd(id, e.point, e);
+  };
+
+  const handlePointerOut = (e) => {
+    // pointer left the mesh; inform hover cleared
     if (onHoverInstance) onHoverInstance(null);
   };
 
   return (
-    <instancedMesh ref={meshRef} args={[null, null, count]} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerOut={handlePointerOut}>
+    <instancedMesh
+      ref={meshRef}
+      args={[null, null, count]}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerOut={handlePointerOut}
+    >
       <sphereGeometry args={[1, 12, 12]} />
-      <meshStandardMaterial metalness={0.4} roughness={0.6} />
+      {/* use a material that supports vertex colors via instanceColor */}
+      <meshStandardMaterial
+        metalness={0.4}
+        roughness={0.6}
+        vertexColors={true}
+      />
     </instancedMesh>
   );
 }
 
 function EdgeSegments({ edges, positionsRef }) {
-  // A single BufferGeometry with 2 vertices per edge (a,b). We also store per-vertex
-  // colors so the edge color can reflect the generating element.
   const lineRef = useRef();
-  const posArr = useMemo(() => new Float32Array(edges.length * 2 * 3), [edges.length]);
-  const colArr = useMemo(() => new Float32Array(edges.length * 2 * 3), [edges.length]);
+  const posArr = useMemo(
+    () => new Float32Array(edges.length * 2 * 3),
+    [edges.length]
+  );
+  const colArr = useMemo(
+    () => new Float32Array(edges.length * 2 * 3),
+    [edges.length]
+  );
 
   useFrame(() => {
     const pos = positionsRef.current;
@@ -372,14 +458,23 @@ function EdgeSegments({ edges, positionsRef }) {
       const a = pos[e.a];
       const b = pos[e.b];
       const base = i * 6;
-      // defensive guards (a or b might be undefined briefly while positions are being reset)
       if (!a || !b) continue;
-      posArr[base + 0] = a.x; posArr[base + 1] = a.y; posArr[base + 2] = a.z;
-      posArr[base + 3] = b.x; posArr[base + 4] = b.y; posArr[base + 5] = b.z;
+      posArr[base + 0] = a.x;
+      posArr[base + 1] = a.y;
+      posArr[base + 2] = a.z;
+      posArr[base + 3] = b.x;
+      posArr[base + 4] = b.y;
+      posArr[base + 5] = b.z;
       const col = new THREE.Color(PALETTE[e.gen % PALETTE.length]);
-      const r = col.r, g = col.g, bcol = col.b;
-      colArr[base + 0] = r; colArr[base + 1] = g; colArr[base + 2] = bcol;
-      colArr[base + 3] = r; colArr[base + 4] = g; colArr[base + 5] = bcol;
+      const r = col.r,
+        g = col.g,
+        bcol = col.b;
+      colArr[base + 0] = r;
+      colArr[base + 1] = g;
+      colArr[base + 2] = bcol;
+      colArr[base + 3] = r;
+      colArr[base + 4] = g;
+      colArr[base + 5] = bcol;
     }
     const geom = lineRef.current.geometry;
     if (geom.attributes.position) {
@@ -396,8 +491,18 @@ function EdgeSegments({ edges, positionsRef }) {
   return (
     <lineSegments ref={lineRef}>
       <bufferGeometry>
-        <bufferAttribute attach="attributes-position" array={posArr} count={posArr.length / 3} itemSize={3} />
-        <bufferAttribute attach="attributes-color" array={colArr} count={colArr.length / 3} itemSize={3} />
+        <bufferAttribute
+          attach="attributes-position"
+          array={posArr}
+          count={posArr.length / 3}
+          itemSize={3}
+        />
+        <bufferAttribute
+          attach="attributes-color"
+          array={colArr}
+          count={colArr.length / 3}
+          itemSize={3}
+        />
       </bufferGeometry>
       <lineBasicMaterial attach="material" vertexColors={true} />
     </lineSegments>
@@ -405,8 +510,6 @@ function EdgeSegments({ edges, positionsRef }) {
 }
 
 function ArrowHeads({ edges, positionsRef, size = 0.2 }) {
-  // Arrow cones are instantiated; each cone's instance matrix is set so the cone
-  // is positioned along the edge and oriented along the edge direction.
   const meshRef = useRef();
   const tmpMat = useMemo(() => new THREE.Matrix4(), []);
   const tmpVec = useMemo(() => new THREE.Vector3(), []);
@@ -423,23 +526,25 @@ function ArrowHeads({ edges, positionsRef, size = 0.2 }) {
       tmpVec.set(b.x - a.x, b.y - a.y, b.z - a.z);
       const len = tmpVec.length() || 1;
       const dir = tmpVec.clone().normalize();
-      const t = 1 / 3; // position the arrow 2/3 of the way along (closer to head)
+      const t = 1 / 3;
       const px = a.x + dir.x * len * t;
       const py = a.y + dir.y * len * t;
       const pz = a.z + dir.z * len * t;
-      q.setFromUnitVectors(up, dir); // rotate cone's +Y to align with dir
+      q.setFromUnitVectors(up, dir);
       tmpMat.compose(new Vector3(px, py, pz), q, new Vector3(size, size, size));
       meshRef.current.setMatrixAt(i, tmpMat);
-      // set per-instance color if supported by r3f/three version
       if (meshRef.current.setColorAt) {
-        meshRef.current.setColorAt(i, new THREE.Color(PALETTE[e.gen % PALETTE.length]));
+        meshRef.current.setColorAt(
+          i,
+          new THREE.Color(PALETTE[e.gen % PALETTE.length])
+        );
       }
     }
     meshRef.current.instanceMatrix.needsUpdate = true;
-    if (meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true;
+    if (meshRef.current.instanceColor)
+      meshRef.current.instanceColor.needsUpdate = true;
   });
 
-  // cone geometry args: [radius, height, radialSegments]
   return (
     <instancedMesh ref={meshRef} args={[null, null, edges.length]}>
       <coneGeometry args={[0.3, 1.9, 12]} />
@@ -448,15 +553,11 @@ function ArrowHeads({ edges, positionsRef, size = 0.2 }) {
   );
 }
 
-
 // ---------------------------------------------------------------------------
 // MAIN UI: controls, presets, and the Canvas + rendered objects
-// The left-hand panel holds presets, sliders and the verification list. The
-// right-hand side is a full-screen Canvas where the scene is rendered.
 // ---------------------------------------------------------------------------
 
 function DebugOverlay({ positionsRef, edgesRef, nodeCount }) {
-  // small overlay showing counts to help debug race conditions without crashing
   const [snapshot, setSnapshot] = useState({ posLen: 0, edges: 0 });
   useEffect(() => {
     let raf = null;
@@ -471,8 +572,20 @@ function DebugOverlay({ positionsRef, edgesRef, nodeCount }) {
   }, [positionsRef, edgesRef]);
 
   return (
-    <Html position={[3.2, 4.9, 0]} occlude={false} style={{ pointerEvents: 'none' }}>
-      <div style={{ background: 'rgba(0,0,0,0.6)', color: '#fff', padding: 8, fontSize: 12, borderRadius: 6 }}>
+    <Html
+      position={[3.2, 4.9, 0]}
+      occlude={false}
+      style={{ pointerEvents: "none" }}
+    >
+      <div
+        style={{
+          background: "rgba(0,0,0,0.6)",
+          color: "#fff",
+          padding: 8,
+          fontSize: 12,
+          borderRadius: 6,
+        }}
+      >
         <div>nodes (expected): {nodeCount}</div>
         <div>positions.length: {snapshot.posLen}</div>
         <div>edges.length: {snapshot.edges}</div>
@@ -481,29 +594,22 @@ function DebugOverlay({ positionsRef, edgesRef, nodeCount }) {
   );
 }
 
-function useThrottledDebugLog(positionsRef, edgesRef, count, enabled = false) {
-  const lastRef = useRef(0);
-  useFrame(() => {
-    if (!enabled) return;
-    const now = performance.now();
-    if (now - lastRef.current < 500) return;
-    lastRef.current = now;
-    const posLen = positionsRef.current ? positionsRef.current.length : 0;
-    console.log('[DBG] count=%d positions=%d edges=%d sample0=%o', count, posLen, (edgesRef.current||[]).length, positionsRef.current && positionsRef.current[0]);
-  });
-}
-
 export default function CayleyGraphVisualizer() {
-  // group parameters
   const [n, setN] = useState(4);
-  const [generatorInput, setGeneratorInput] = useState('(1 2),(1 3),(3 4)');
+  const [generatorInput, setGeneratorInput] = useState("(1 2),(1 3),(3 4)");
   const [presets] = useState({
-    'S4 polyhedron': { n: 4, gens: ['(1 2)', '(1 3)', '(3 4)'] },
-    'A5 dodecahedron-ish': { n: 5, gens: ['(1 2)(3 4)', '(1 2 3 4 5)', '(5 4 3 2 1)'] },
+    "S4 polyhedron": { n: 4, gens: ["(1 2)", "(1 3)", "(3 4)"] },
+    "A5 dodecahedron-ish": {
+      n: 5,
+      gens: ["(1 2)(3 4)", "(1 2 3 4 5)", "(5 4 3 2 1)"],
+    },
+    "A5 two gens": {
+      n: 5,
+      gens: ["(1 2 3 4 5)", "(1 2 3 5 4)"],
+    },
   });
-  const [selectedPreset, setSelectedPreset] = useState('S4 polyhedron');
+  const [selectedPreset, setSelectedPreset] = useState("S4 polyhedron");
 
-  // physics/UI state (controlled by sliders)
   const [springK, setSpringK] = useState(1.5);
   const [repulsionK, setRepulsionK] = useState(0.12);
   const [damping, setDamping] = useState(0.85);
@@ -514,110 +620,334 @@ export default function CayleyGraphVisualizer() {
   const [showElementList, setShowElementList] = useState(true);
   const [enableRepulsion, setEnableRepulsion] = useState(true);
 
-  // when a preset is selected we write its values into n and generatorInput.
-  // This effect runs on mount (initial preset) and whenever the preset changes.
   useEffect(() => {
     const p = presets[selectedPreset];
     if (p) {
       setN(p.n);
-      setGeneratorInput(p.gens.join(','));
+      setGeneratorInput(p.gens.join(","));
     }
   }, [selectedPreset, presets]);
 
-  // parse input -> names and generators
-  const generatorNames = useMemo(() => generatorInput.split(',').map((s) => s.trim()).filter(Boolean), [generatorInput]);
-  const shortLabels = useMemo(() => ['R', 'B', 'G', 'P', 'O', 'Y', 'C', 'M'], []);
-  // convert textual generators into permutation arrays (0-based)
-  const generators = useMemo(() => generatorNames.map((s) => parseCycleNotation(s, n)), [generatorNames, n]);
+  const generatorNames = useMemo(
+    () =>
+      generatorInput
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [generatorInput]
+  );
+  const shortLabels = useMemo(
+    () => ["R", "B", "G", "P", "O", "Y", "C", "M"],
+    []
+  );
+  const generators = useMemo(
+    () => generatorNames.map((s) => parseCycleNotation(s, n)),
+    [generatorNames, n]
+  );
 
-  // build Cayley graph nodes and edges (purely functional; fast for S4/A5)
-  const { nodeObjs, edges } = useMemo(() => buildCayley(n, generators), [n, generators]);
-  const count = nodeObjs.length; // number of group elements
+  // per-generator tension state. Default 1.0 for each generator. We provide
+  // sliders in the sidebar so the user can tune each generator individually.
+  const [genTensions, setGenTensions] = useState(() =>
+    generatorNames.map(() => 1.0)
+  );
+  useEffect(() => {
+    // when generator count changes, resize genTensions preserving prefixes
+    setGenTensions((old) => {
+      const next = generatorNames.map((_, i) =>
+        old[i] !== undefined ? old[i] : 1.0
+      );
+      return next;
+    });
+  }, [generatorNames.length]);
 
-  // listing used in the left-hand verification box (shows bracket string, short word label, and cycle notation)
-  const listing = useMemo(() => nodeObjs.map((o) => {
-    const permStr = permTo1basedString(o.perm);
-    const w = o.word; // array of generator indices in application order
-    let wordLabel = 'e';
-    if (w.length > 0) wordLabel = w.slice().reverse().map((gi) => shortLabels[gi] ?? `g${gi}`).join('');
-    return { permStr, wordLabel, cycle: permToCycleString(o.perm) };
-  }), [nodeObjs, shortLabels]);
+  const { nodeObjs, edges } = useMemo(
+    () => buildCayley(n, generators),
+    [n, generators]
+  );
+  const count = nodeObjs.length;
 
-  // positionsRef holds mutable per-node positions used by physics + rendering
+  const listing = useMemo(
+    () =>
+      nodeObjs.map((o) => {
+        const permStr = permTo1basedString(o.perm);
+        const w = o.word;
+        let wordLabel = "e";
+        if (w.length > 0)
+          wordLabel = w
+            .slice()
+            .reverse()
+            .map((gi) => shortLabels[gi] ?? `g${gi}`)
+            .join("");
+        return { permStr, wordLabel, cycle: permToCycleString(o.perm) };
+      }),
+    [nodeObjs, shortLabels]
+  );
+
   const positionsRef = useRef([]);
   const positionsReadyRef = useRef(false);
   const edgesRef = useRef(edges);
-  const pinnedRef = useRef(new Array(count).fill(false)); // which nodes are pinned by clicks
+  const pinnedRef = useRef(new Array(count).fill(false));
   const selectedIdRef = useRef(null);
 
-  // when the graph changes (different preset / generators) re-seed positions,
-  // edgesRef and pinnedRef. This happens synchronously after buildCayley runs.
   useEffect(() => {
     positionsReadyRef.current = false;
-    positionsRef.current = initPositions(count, Math.max(3, Math.pow(count, 1 / 3)));
+    positionsRef.current = initPositions(
+      count,
+      Math.max(3, Math.pow(count, 1 / 3))
+    );
     edgesRef.current = edges;
     pinnedRef.current = new Array(count).fill(false);
     selectedIdRef.current = null;
-    // mark ready on next microtask so renderers don't race on the same tick
-    Promise.resolve().then(() => { positionsReadyRef.current = true; });
+    Promise.resolve().then(() => {
+      positionsReadyRef.current = true;
+    });
   }, [count, edges]);
 
-  const physicsParams = useMemo(() => ({ springK, repulsionK, damping, jostle, running, enableRepulsion }), [springK, repulsionK, damping, jostle, running, enableRepulsion]);
+  const genTensionsRef = useRef(genTensions);
+  useEffect(() => {
+    genTensionsRef.current = genTensions;
+  }, [genTensions]);
 
-  const [hoverId, setHoverId] = useState(null); // hovered instance id for Html label
+  const physicsParams = useMemo(
+    () => ({ springK, repulsionK, damping, jostle, running, enableRepulsion }),
+    [springK, repulsionK, damping, jostle, running, enableRepulsion]
+  );
+
+  const [hoverId, setHoverId] = useState(null);
 
   function handleClickInstance(id) {
-    // toggle pinned flag for clicked node
     pinnedRef.current[id] = !pinnedRef.current[id];
     selectedIdRef.current = id;
   }
-  function handleHoverInstance(id) { setHoverId(id); }
+  function handleHoverInstance(id) {
+    setHoverId(id);
+  }
 
-  // ----------------------------- UI rendering -----------------------------
+  // nodeModesRef holds a string mode for each node: 'normal' | 'drag' | 'pin'
+  const nodeModesRef = useRef(new Array(count).fill("normal"));
+  useEffect(() => {
+    // whenever node count changes, resize and preserve prefix
+    const old = nodeModesRef.current || [];
+    const next = new Array(count);
+    for (let i = 0; i < count; i++) next[i] = old[i] || "normal";
+    nodeModesRef.current = next;
+  }, [count]);
+
+  // dragging state
+  const draggingRef = useRef({ id: null, offset: { x: 0, y: 0, z: 0 } });
+
+  // new handlers
+  function cycleNodeMode(id) {
+    const modes = nodeModesRef.current;
+    const cur = modes[id] || "normal";
+    let next = "normal";
+    if (cur === "normal") next = "drag";
+    else if (cur === "drag") next = "pin";
+    else if (cur === "pin") next = "normal";
+    modes[id] = next;
+    nodeModesRef.current = modes;
+    // if entering pin mode, mark pinnedRef
+    if (next === "pin") pinnedRef.current[id] = true;
+    if (next !== "pin") pinnedRef.current[id] = false;
+  }
+
+  function handleClickInstance_new(id, event) {
+    // Clicking cycles modes and if the new mode is `drag` we mark dragging
+    cycleNodeMode(id);
+    const modeNow = nodeModesRef.current[id];
+    if (modeNow === "drag") {
+      // start dragging and compute offset between pointer point and node center
+      const pt = event.point;
+      const pos = positionsRef.current[id];
+      draggingRef.current = {
+        id,
+        offset: { x: pos.x - pt.x, y: pos.y - pt.y, z: pos.z - pt.z },
+      };
+      // also prevent physics from updating this node by setting pinned false
+      pinnedRef.current[id] = true; // keep it fixed while dragging (but we'll
+      // manually move it)
+    } else {
+      // if we transitioned out of drag mode, clear draggingRef
+      if (draggingRef.current.id === id) draggingRef.current = { id: null };
+    }
+  }
+
+  function handleDragStart(id, point, event) {
+    // Some devices (touch) may call dragStart separately. We support it by
+    // setting draggingRef similarly.
+    const pos = positionsRef.current[id];
+    draggingRef.current = {
+      id,
+      offset: { x: pos.x - point.x, y: pos.y - point.y, z: pos.z - point.z },
+    };
+    pinnedRef.current[id] = true;
+  }
+
+  function handleDrag(id, point, event) {
+    if (draggingRef.current.id == null) return;
+    const did = draggingRef.current.id;
+    if (did !== id) return; // ignore drag events for other instances
+    const off = draggingRef.current.offset || { x: 0, y: 0, z: 0 };
+    // set the node position directly (it will be rendered next frame)
+    positionsRef.current[did].x = point.x + off.x;
+    positionsRef.current[did].y = point.y + off.y;
+    positionsRef.current[did].z = point.z + off.z;
+    // zero velocity so physics doesn't snap it
+    positionsRef.current[did].vx = 0;
+    positionsRef.current[did].vy = 0;
+    positionsRef.current[did].vz = 0;
+  }
+
+  function handleDragEnd(id, point, event) {
+    if (draggingRef.current.id !== id) return;
+    // finish dragging: if node's mode is still 'drag' we keep it in 'drag'
+    // mode until the user clicks again to pin it; but we un-mark pinnedRef so
+    // that if user wants physics to move it, they can toggle mode.
+    pinnedRef.current[id] = nodeModesRef.current[id] === "pin";
+    draggingRef.current = { id: null };
+  }
+
   return (
     <div className="flex h-screen w-screen">
-<div className="w-96 p-4 border-r overflow-auto bg-gray-50 cg-sidebar" style={{ minWidth: 320 }}>
+      <div
+        className="w-96 p-4 border-r overflow-auto bg-gray-50 cg-sidebar"
+        style={{ minWidth: 320 }}
+      >
         <h2 className="text-lg font-semibold">Cayley graph visualizer</h2>
         <div className="mt-3">
           <label className="block text-sm">Preset</label>
-          <select value={selectedPreset} onChange={(e) => setSelectedPreset(e.target.value)} className="w-full mt-1 p-1 border">
-            {Object.keys(presets).map((k) => <option key={k} value={k}>{k}</option>)}
+          <select
+            value={selectedPreset}
+            onChange={(e) => setSelectedPreset(e.target.value)}
+            className="w-full mt-1 p-1 border"
+          >
+            {Object.keys(presets).map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
           </select>
         </div>
 
         <div className="mt-3">
           <label className="block text-sm">n (group S_n)</label>
-          <input value={n} onChange={(e) => setN(Number(e.target.value))} type="number" min={2} max={10} className="w-20 mt-1 p-1 border" />
+          <input
+            value={n}
+            onChange={(e) => setN(Number(e.target.value))}
+            type="number"
+            min={2}
+            max={10}
+            className="w-20 mt-1 p-1 border"
+          />
         </div>
 
         <div className="mt-3">
           <label className="block text-sm">Generators (cycle notation)</label>
-          <div className="text-xs text-gray-600 mb-1">Examples: (1 2), (1 2)(3 4), (1 2 3 4 5)</div>
-          <input value={generatorInput} onChange={(e) => setGeneratorInput(e.target.value)} className="w-full mt-1 p-1 border text-sm" />
+          <div className="text-xs text-gray-600 mb-1">
+            Examples: (1 2), (1 2)(3 4), (1 2 3 4 5)
+          </div>
+          <input
+            value={generatorInput}
+            onChange={(e) => setGeneratorInput(e.target.value)}
+            className="w-full mt-1 p-1 border text-sm"
+          />
         </div>
 
         <div className="mt-4">
-          <label className="block text-sm">spring K: {springK.toFixed(2)}</label>
-          <input type="range" min={0.05} max={10} step={0.01} value={springK} onChange={(e) => setSpringK(parseFloat(e.target.value))} className="w-full" /><br/>
-          <label className="block text-sm mt-2">repulsion: {repulsionK.toFixed(3)}</label>
-          <input type="range" min={0.00001} max={0.9} step={0.0001} value={repulsionK} onChange={(e) => setRepulsionK(parseFloat(e.target.value))} className="w-full" /><br/>
-          <label className="block text-sm mt-2">damping: {damping.toFixed(3)}</label>
-          <input type="range" min={0.7} max={0.999} step={0.001} value={damping} onChange={(e) => setDamping(parseFloat(e.target.value))} className="w-full" /><br/>
-          <label className="block text-sm mt-2">jostling: {jostle.toFixed(3)}</label>
-          <input type="range" min={0} max={0.4} step={0.001} value={jostle} onChange={(e) => setJostle(parseFloat(e.target.value))} className="w-full" /><br/>
+          <label className="block text-sm">
+            spring K: {springK.toFixed(2)}
+          </label>
+          <input
+            type="range"
+            min={0.05}
+            max={10}
+            step={0.01}
+            value={springK}
+            onChange={(e) => setSpringK(parseFloat(e.target.value))}
+            className="w-full"
+          />
+          <br />
+          <label className="block text-sm mt-2">
+            repulsion: {repulsionK.toFixed(3)}
+          </label>
+          <input
+            type="range"
+            min={0.00001}
+            max={0.9}
+            step={0.0001}
+            value={repulsionK}
+            onChange={(e) => setRepulsionK(parseFloat(e.target.value))}
+            className="w-full"
+          />
+          <br />
+          <label className="block text-sm mt-2">
+            damping: {damping.toFixed(3)}
+          </label>
+          <input
+            type="range"
+            min={0.7}
+            max={0.999}
+            step={0.001}
+            value={damping}
+            onChange={(e) => setDamping(parseFloat(e.target.value))}
+            className="w-full"
+          />
+          <br />
+          <label className="block text-sm mt-2">
+            jostling: {jostle.toFixed(3)}
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={0.4}
+            step={0.001}
+            value={jostle}
+            onChange={(e) => setJostle(parseFloat(e.target.value))}
+            className="w-full"
+          />
+          <br />
         </div>
 
         <div className="mt-4 flex gap-2">
-          <button className="flex-1 bg-green-600 p-2 rounded" onClick={() => setRunning((r) => !r)}>{running ? "Pause" : "Run"}</button>
-          <button className="flex-1 bg-blue-600 p-2 rounded" onClick={() => { positionsRef.current = initPositions(count); }}>Re-seed</button>
+          <button
+            className="flex-1 bg-green-600 p-2 rounded"
+            onClick={() => setRunning((r) => !r)}
+          >
+            {running ? "Pause" : "Run"}
+          </button>
+          <button
+            className="flex-1 bg-blue-600 p-2 rounded"
+            onClick={() => {
+              positionsRef.current = initPositions(count);
+            }}
+          >
+            Re-seed
+          </button>
         </div>
 
-        <div className="mt-4 text-sm text-gray-700">Nodes: {count}  Generators: {generatorNames.length}</div>
+        <div className="mt-4 text-sm text-gray-700">
+          Nodes: {count} Generators: {generatorNames.length}
+        </div>
 
         <div className="mt-2 flex gap-2">
-          <button className="cg-toggle-btn" onClick={() => setShowLabels(s => !s)}>{showLabels ? 'Hide labels' : 'Show labels'}</button>
-          <button className="cg-toggle-btn" onClick={() => setShowDebugOverlay(s => !s)}>{showDebugOverlay ? 'Hide debug' : 'Show debug'}</button>
-          <button className="cg-toggle-btn" onClick={() => setShowElementList(s => !s)}>{showElementList ? 'Hide element list' : 'Show element list'}</button>
+          <button
+            className="cg-toggle-btn"
+            onClick={() => setShowLabels((s) => !s)}
+          >
+            {showLabels ? "Hide labels" : "Show labels"}
+          </button>
+          <button
+            className="cg-toggle-btn"
+            onClick={() => setShowDebugOverlay((s) => !s)}
+          >
+            {showDebugOverlay ? "Hide debug" : "Show debug"}
+          </button>
+          <button
+            className="cg-toggle-btn"
+            onClick={() => setShowElementList((s) => !s)}
+          >
+            {showElementList ? "Hide element list" : "Show element list"}
+          </button>
         </div>
 
         <div className="mt-4">
@@ -625,8 +955,17 @@ export default function CayleyGraphVisualizer() {
           <div className="mt-2">
             {generatorNames.map((g, i) => (
               <div key={i} className="flex items-center gap-2 mt-1">
-                <div style={{ width: 12, height: 12, background: PALETTE[i % PALETTE.length], borderRadius: 2 }} />
-                <div className="text-sm text-gray-700">{shortLabels[i] ?? `g${i}`} — {g}</div>
+                <div
+                  style={{
+                    width: 12,
+                    height: 12,
+                    background: PALETTE[i % PALETTE.length],
+                    borderRadius: 2,
+                  }}
+                />
+                <div className="text-sm text-gray-700">
+                  {shortLabels[i] ?? `g${i}`} — {g}
+                </div>
               </div>
             ))}
           </div>
@@ -634,67 +973,228 @@ export default function CayleyGraphVisualizer() {
 
         <hr className="my-3" />
 
+        <div>
+          <div className="font-medium">Per-generator tensions</div>
+          <div className="text-xs text-gray-600 mb-1">
+            Higher tension -{">"} shorter target edges. Slider range: 0.1 .. 5.0
+          </div>
+          {generatorNames.map((g, i) => (
+            <div key={`t-${i}`} className="mt-2">
+              <div className="flex items-center justify-between text-sm">
+                <div>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 12,
+                      height: 12,
+                      background: PALETTE[i % PALETTE.length],
+                      marginRight: 8,
+                    }}
+                  ></span>
+                  {shortLabels[i] ?? `g${i}`} — {g}
+                </div>
+                <div className="text-xs">{genTensions[i]?.toFixed(2)}</div>
+              </div>
+              <input
+                type="range"
+                min={0.1}
+                max={5.0}
+                step={0.01}
+                value={genTensions[i] ?? 1.0}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setGenTensions((old) => {
+                    const next = old.slice();
+                    next[i] = v;
+                    return next;
+                  });
+                }}
+                className="w-full"
+              />
+            </div>
+          ))}
+        </div>
+
         {showElementList ? (
-  <div>
-    <div className="flex items-center justify-between">
-      <div className="font-medium mb-2">Elements (verification list)</div>
-      <button className="cg-toggle-btn text-sm" onClick={() => setShowElementList(false)}>Hide</button>
-    </div>
-    <pre className="cg-element-list" style={{ fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-wrap" }}>
-      {listing.map((L) => `${L.permStr}: ${L.wordLabel}  ${L.cycle}`).join("\n")}
-    </pre>
-  </div>
-) : (
-  <div className="mt-2">
-    <button className="cg-toggle-btn" onClick={() => setShowElementList(true)}>Show elements</button>
-  </div>
-)}
+          <div>
+            <div className="flex items-center justify-between">
+              <div className="font-medium mb-2">
+                Elements (verification list)
+              </div>
+              <button
+                className="cg-toggle-btn text-sm"
+                onClick={() => setShowElementList(false)}
+              >
+                Hide
+              </button>
+            </div>
+            <pre
+              className="cg-element-list"
+              style={{
+                fontFamily: "monospace",
+                fontSize: 12,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {listing
+                .map((L) => `${L.permStr}: ${L.wordLabel}  ${L.cycle}`)
+                .join("\n")}
+            </pre>
+          </div>
+        ) : (
+          <div className="mt-2">
+            <button
+              className="cg-toggle-btn"
+              onClick={() => setShowElementList(true)}
+            >
+              Show elements
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 bg-black flex cg-canvas-container">
-        <Canvas style={{ width: "100%", height: "90vh" }} dpr={[1, 2]} camera={{ position: [0, 0, Math.max(12, Math.pow(Math.max(1, count), 1 / 3) * 4)], fov: 50 }}>
+        <Canvas
+          style={{ width: "100%", height: "90vh" }}
+          dpr={[1, 2]}
+          camera={{
+            position: [
+              0,
+              0,
+              Math.max(12, Math.pow(Math.max(1, count), 1 / 3) * 4),
+            ],
+            fov: 50,
+          }}
+        >
           <ambientLight intensity={0.6} />
           <directionalLight intensity={0.6} position={[5, 5, 5]} />
 
-          <OrbitControls enableZoom enablePan enableRotate zoomSpeed={0.8} rotateSpeed={0.6} />
+          <OrbitControls
+            enableZoom
+            enablePan
+            enableRotate
+            zoomSpeed={0.8}
+            rotateSpeed={0.6}
+          />
 
           <AutoCamera count={count} />
-          <Physics positionsRef={positionsRef} edgesRef={edgesRef} pinnedRef={pinnedRef} params={physicsParams} />
+          <Physics
+            positionsRef={positionsRef}
+            edgesRef={edgesRef}
+            pinnedRef={pinnedRef}
+            params={physicsParams}
+            genTensionsRef={genTensionsRef}
+          />
 
-          <EdgeSegments key={`edges-${edges.length}`} edges={edges} positionsRef={positionsRef} color={"#666"} />
-          <ArrowHeads key={`arrows-${edges.length}`} edges={edges} positionsRef={positionsRef} color={"#ddd"} size={0.16} />
+          <EdgeSegments
+            key={`edges-${edges.length}`}
+            edges={edges}
+            positionsRef={positionsRef}
+          />
+          <ArrowHeads
+            key={`arrows-${edges.length}`}
+            edges={edges}
+            positionsRef={positionsRef}
+            size={0.16}
+          />
 
-          <InstancedNodes key={`nodes-${count}`} positionsRef={positionsRef} count={count} onClickInstance={handleClickInstance} onHoverInstance={handleHoverInstance} selectedIdRef={selectedIdRef} />
+          <InstancedNodes
+            key={`nodes-${count}`}
+            positionsRef={positionsRef}
+            count={count}
+            onClickInstance={handleClickInstance_new}
+            onHoverInstance={handleHoverInstance}
+            onDragStart={handleDragStart}
+            onDrag={handleDrag}
+            onDragEnd={handleDragEnd}
+            nodeModesRef={nodeModesRef}
+          />
 
-          {showDebugOverlay && <DebugOverlay positionsRef={positionsRef} edgesRef={edgesRef} nodeCount={count} /> }
+          {showDebugOverlay && (
+            <DebugOverlay
+              positionsRef={positionsRef}
+              edgesRef={edgesRef}
+              nodeCount={count}
+            />
+          )}
 
           {(() => {
             if (!showLabels) return null;
-            const positionsReady = positionsRef.current && positionsReadyRef.current && positionsRef.current.length >= nodeObjs.length;
+            const positionsReady =
+              positionsRef.current &&
+              positionsReadyRef.current &&
+              positionsRef.current.length >= nodeObjs.length;
             if (!positionsReady) return null;
             return nodeObjs.map((o, i) => {
               const posi = positionsRef.current[i];
               if (!posi) return null;
               return (
-                <Html key={'label-' + i} distanceFactor={8} style={{ pointerEvents: 'none' }} position={[posi.x, posi.y + 0.28, posi.z]}>
-                  <div style={{ background: 'rgba(255,255,255,0.9)', padding: '4px 6px', borderRadius: 4, fontSize: 12 }}>{permTo1basedString(o.perm)}</div>
+                <Html
+                  key={"label-" + i}
+                  distanceFactor={8}
+                  style={{ pointerEvents: "none" }}
+                  position={[posi.x, posi.y + 0.28, posi.z]}
+                >
+                  <div
+                    style={{
+                      background: "rgba(255,255,255,0.9)",
+                      padding: "4px 6px",
+                      borderRadius: 4,
+                      fontSize: 12,
+                    }}
+                  >
+                    {permTo1basedString(o.perm)}
+                  </div>
                 </Html>
               );
             });
           })()}
 
           {showLabels && count > 300 && (
-            <Html distanceFactor={8} style={{ pointerEvents: 'none' }} position={[0, 0, 0]}>
-              <div style={{ background: 'rgba(255,255,255,0.9)', padding: '6px', borderRadius: 6, fontSize: 12 }}>Labels disabled for large graphs; hover nodes to see a label.</div>
+            <Html
+              distanceFactor={8}
+              style={{ pointerEvents: "none" }}
+              position={[0, 0, 0]}
+            >
+              <div
+                style={{
+                  background: "rgba(255,255,255,0.9)",
+                  padding: "6px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}
+              >
+                Labels disabled for large graphs; hover nodes to see a label.
+              </div>
             </Html>
           )}
 
-          {hoverId != null && positionsRef.current && hoverId < positionsRef.current.length && (
-            <Html distanceFactor={8} style={{ pointerEvents: "none" }} position={[positionsRef.current[hoverId].x, positionsRef.current[hoverId].y + 0.3, positionsRef.current[hoverId].z]}>
-              <div style={{ background: "rgba(255,255,255,0.9)", padding: "6px 8px", borderRadius: 6, fontSize: 12 }}>{permTo1basedString(nodeObjs[hoverId].perm)}<br/>{listing[hoverId].wordLabel}</div>
-            </Html>
-          )}
-
+          {hoverId != null &&
+            positionsRef.current &&
+            hoverId < positionsRef.current.length && (
+              <Html
+                distanceFactor={8}
+                style={{ pointerEvents: "none" }}
+                position={[
+                  positionsRef.current[hoverId].x,
+                  positionsRef.current[hoverId].y + 0.3,
+                  positionsRef.current[hoverId].z,
+                ]}
+              >
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.9)",
+                    padding: "6px 8px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                  }}
+                >
+                  {permTo1basedString(nodeObjs[hoverId].perm)}
+                  <br />
+                  {listing[hoverId].wordLabel}
+                </div>
+              </Html>
+            )}
         </Canvas>
       </div>
     </div>

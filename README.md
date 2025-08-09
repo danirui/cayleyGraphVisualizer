@@ -11,3 +11,26 @@ View it at this link [https://codesandbox.io/p/github/danirui/cayleyGraphVisuali
 Nodes will have labels (may have to wait a bit before they load/appear), unless you don't want them in which case you can hide them.
 
 The UI is intuitive, self-explanatory. The "physics" engine (jostling, repulsion, springs, etc.) is to evolve the Cayley graph into a nice geometric shape.
+
+A sample of some things I asked ChatGPT:
+
+> in this video [https://www.youtube.com/watch?app=desktop&v=HbEd3Sef13I&ab_channel=WhatisMath%3F](https://www.youtube.com/watch?app=desktop&v=HbEd3Sef13I&ab_channel=WhatisMath%3F) some cayley graphs are depicted. in particular the group G = S_4 and set of generators S = (12), (13), (34)
+> and G = A_5 and set of generators S = (12)(34), (12345), (54321)
+>
+> I want to write code visualizing cayley graphs of groups, as follows: user interface should begin with G=S_n. User gets to choose set of generators S (maybe some presets or a list of recommendations)
+>
+> Then one can generate the cayley graph abstractly (some work needs to be done to see if 2 "words" refer to the same element, you'll have to figure it out).
+
+> just print out all the nodes: starting node is e (permutation \[1234\]), then say apply R=Red=(12) to get to \[2134\]. so the printed list should look something like
+>
+> \[1234\]: e
+>
+> \[2134\]: R
+>
+> \[2143\]: YR "apply red, then yellow, reading right to left"
+>
+> etc.
+
+> The next step is to visualize it. One idea is to plot in 3d, and have springs on the edges with strengths that the user can manipulate on a slide perhaps, + jostling whose strength the user can also manipulate, that will stretch and pull the abstract graph into a stable 3D configuration. this should play as a live animation, where again the user can change things on slides for example and see it reflected in the animation.
+>
+> it may help to look over this website [https://juliapoo.github.io/mathematics/2023/07/15/plotting-cayley-graphs.html](https://juliapoo.github.io/mathematics/2023/07/15/plotting-cayley-graphs.html) and its source code [https://github.com/JuliaPoo/Cayley-Graph-Plotting](https://github.com/JuliaPoo/Cayley-Graph-Plotting) for inspiration. in particular, nice features are arrows on the edges, labels on edge corresponding to an element of S, Julia's smooth animations. dragging around mouse rotates, scrolling zooms
