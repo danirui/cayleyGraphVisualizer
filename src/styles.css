@@ -55,6 +55,7 @@ body,
 .cg-sidebar .text-sm {
   color: var(--muted);
   font-size: 13px;
+  width: 100%;
 }
 
 /* Toggle button styling */

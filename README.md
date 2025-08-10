@@ -6,7 +6,13 @@ Created with CodeSandbox
 
 Written completely by ChatGPT, under my guidance/prompting. It works shockingly well.
 
-View it at this link [https://codesandbox.io/p/github/danirui/cayleyGraphVisualizer/main](https://codesandbox.io/p/github/danirui/cayleyGraphVisualizer/main). On the right hand side panel, click `Start 3000` and the Preview should open.
+View it at this link [https://codesandbox.io/p/github/danirui/cayleyGraphVisualizer/main](https://codesandbox.io/p/github/danirui/cayleyGraphVisualizer/main). On the right hand side panel, click `Start 3000` and the Preview should open. (May need to do Project Setup, click all the way through, and at the end do Preview3000?)
+
+As usual, click and drag on the viewing window to rotate (around a fixed origin), scroll to zoom in and out, and right-click and drag to translate the things on screen around (the origin of rotation seems to remain fixed).
+
+---
+
+## Slightly more technical user manual
 
 Nodes will have labels (may have to wait a bit before they load/appear in the correct places), unless you don't want them in which case you can hide them by toggling a button in the control panel.
 
@@ -14,7 +20,9 @@ The UI is intuitive, self-explanatory. The "physics" engine (jostling, repulsion
 
 Different colored edges now can have different spring tensions. Also, users can now hover over (more info appears) and click nodes (color changes to yellow) to (1.) pin in place and (2.) drag nodes to different places manually, in case the stochastic jostling is not producing desirable results.
 
-Small quirk: once you click a node once, the scroll/pan/rotate/zoom capabilities shut off (a side-effect of trying to make it so that dragging a node around doesn't also rotate/pan/scroll the viewing window). But if you click multiple nodes (turning them all yellow --- you may have to lightly drag before you click), and you "unclick" just one of them (also by lightly dragging/throwing it), the scroll/pan/rotate/zoom capabilities come back.
+Small quirk: once you click a node once, the scroll/pan/rotate/zoom capabilities shut off (a side-effect of trying to make it so that dragging a node around doesn't also rotate/pan/scroll the viewing window). But if you click multiple nodes (turning them all yellow --- you may have to lightly drag/throw a node before you click it), and you "unclick" just one of them (also by lightly dragging/throwing it), the scroll/pan/rotate/zoom capabilities come back.
+
+Another small quirk: `springK` also controls the "natural length" of a spring; the higher the value, the shorter the natural length, so the visual effect is that setting `springK` high means all the edges _want_ to contract.
 
 ---
 

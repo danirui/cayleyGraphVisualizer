@@ -218,7 +218,7 @@ function Physics({
       const tvals = genTensionsRef.current || [];
       const gT = tvals[ed.gen] || 0; // tension per edge, zero means no spring
       const k = springK * gT; // spring constant per edge, zero means no spring force
-      const effectiveIdeal = idealBase / Math.max(springK, 1); // fixed ideal length for all edges
+      const effectiveIdeal = idealBase / Math.max(springK, 2); // fixed ideal length for all edges
       const f = k * (dist - effectiveIdeal);
       const fx = (f * dx) / dist;
       const fy = (f * dy) / dist;
@@ -1134,7 +1134,7 @@ export default function CayleyGraphVisualizer() {
             Re-seed
           </button>
         </div>
-
+        <br />
         <div className="mt-4 text-sm text-gray-700">
           Nodes: {count} Generators: {generatorNames.length}
         </div>
@@ -1144,7 +1144,7 @@ export default function CayleyGraphVisualizer() {
             className="cg-toggle-btn"
             onClick={() => setShowLabels((s) => !s)}
           >
-            {showLabels ? "Hide labels" : "Show labels"}
+            {showLabels ? "Hide node labels" : "Show node labels"}
           </button>
           <button
             className="cg-toggle-btn"
@@ -1159,7 +1159,7 @@ export default function CayleyGraphVisualizer() {
             {showElementList ? "Hide element list" : "Show element list"}
           </button>
         </div>
-
+        <br />
         <div className="mt-3">
           <label className="block text-sm">Composition direction</label>
           <div className="text-xs text-gray-600 mb-1">
@@ -1180,7 +1180,7 @@ export default function CayleyGraphVisualizer() {
             <option value="left">Precompose (left-multiply)</option>
           </select>
         </div>
-
+        <br />
         <div className="mt-4">
           <div className="font-medium">Generators (legend)</div>
           <div className="mt-2">
