@@ -93,28 +93,39 @@ function permToCycleString(p) {
 // is an array of generator indices in *application order* (we append when
 // right-multiplying). This gives shortest words automatically.
 // ---------------------------------------------------------------------------
-function generateGroup(n, generators) {
+function generateGroup(n, generators, composeLeft = false) {
   const id = idPermutation(n);
   const idKey = permToKey(id);
   const seen = new Map();
   const queue = [];
   seen.set(idKey, { perm: id, word: [] });
   queue.push(id);
+
   while (queue.length) {
     const cur = queue.shift();
     const curKey = permToKey(cur);
     const curEntry = seen.get(curKey);
+
     for (let i = 0; i < generators.length; i++) {
       const g = generators[i];
-      const next = composePerm(cur, g);
+      // choose composition order
+      const next = composeLeft ? composePerm(g, cur) : composePerm(cur, g);
+
       const k = permToKey(next);
       if (!seen.has(k)) {
-        const wordArr = curEntry.word.concat([i]);
+        // store word in application order:
+        // - if right-multiplying (postcompose): append
+        // - if left-multiplying (precompose): prepend
+        const wordArr = composeLeft
+          ? [i].concat(curEntry.word)
+          : curEntry.word.concat([i]);
+
         seen.set(k, { perm: next, word: wordArr });
         queue.push(next);
       }
     }
   }
+
   const arr = Array.from(seen.values());
   arr.sort((A, B) => {
     const ka = permToKey(A.perm);
@@ -123,14 +134,17 @@ function generateGroup(n, generators) {
   });
   return arr;
 }
-function buildCayley(n, generators) {
-  const nodeObjs = generateGroup(n, generators);
+
+function buildCayley(n, generators, composeLeft = false) {
+  const nodeObjs = generateGroup(n, generators, composeLeft);
   const keyIndex = new Map(nodeObjs.map((o, i) => [permToKey(o.perm), i]));
   const edges = [];
   for (let i = 0; i < nodeObjs.length; i++) {
     const p = nodeObjs[i].perm;
     for (let gi = 0; gi < generators.length; gi++) {
-      const next = composePerm(p, generators[gi]);
+      const next = composeLeft
+        ? composePerm(generators[gi], p)
+        : composePerm(p, generators[gi]);
       const j = keyIndex.get(permToKey(next));
       if (j === undefined) continue;
       edges.push({ a: i, b: j, gen: gi });
@@ -204,7 +218,7 @@ function Physics({
       const tvals = genTensionsRef.current || [];
       const gT = tvals[ed.gen] || 0; // tension per edge, zero means no spring
       const k = springK * gT; // spring constant per edge, zero means no spring force
-      const effectiveIdeal = idealBase; // fixed ideal length for all edges
+      const effectiveIdeal = idealBase / Math.max(springK, 1); // fixed ideal length for all edges
       const f = k * (dist - effectiveIdeal);
       const fx = (f * dx) / dist;
       const fy = (f * dy) / dist;
@@ -313,7 +327,7 @@ function InstancedNodes({
   onDrag,
   onDragEnd,
   nodeModesRef,
-  nodesMeshRef, // <-- incoming ref from parent so handlers can change material color
+  nodesMeshRef,
   size = 0.14,
 }) {
   const meshRef = useRef();
@@ -333,28 +347,81 @@ function InstancedNodes({
     initialPoint: null,
   });
 
+  const lastHoverRef = useRef(null);
+
   useEffect(() => {
-    // ensure default material color is gray on mount
     if (meshRef.current && meshRef.current.material) {
       meshRef.current.material.color.set("#ffffff");
       if (nodesMeshRef) nodesMeshRef.current = meshRef.current;
+      // ensure geometry has boundingSphere for raycasting stability
+      const geom = meshRef.current.geometry;
+      if (geom && !geom.boundingSphere) geom.computeBoundingSphere();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, nodesMeshRef]);
 
-  // cleanup listeners on unmount
+  // ---------- global canvas pointer handlers (robust hover+click fallback) ----------
   useEffect(() => {
-    return () => {
-      try {
-        if (typeof window !== "undefined") {
-          window.removeEventListener("pointermove", globalPointerMove);
-          window.removeEventListener("pointerup", globalPointerUp);
+    const canvas = gl.domElement;
+    if (!canvas) return;
+
+    function getMouseFromEvent(ev) {
+      const rect = canvas.getBoundingClientRect();
+      const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+      return { x, y };
+    }
+
+    const onCanvasPointerMove = (ev) => {
+      const { x, y } = getMouseFromEvent(ev);
+      mouseRef.current.x = x;
+      mouseRef.current.y = y;
+      raycasterRef.current.setFromCamera(mouseRef.current, camera);
+      const mesh = meshRef.current;
+      if (!mesh) {
+        if (lastHoverRef.current !== null) {
+          lastHoverRef.current = null;
+          onHoverInstance && onHoverInstance(null);
         }
-      } catch (_) {}
+        return;
+      }
+      const inter = raycasterRef.current.intersectObject(mesh, true);
+      const id = inter && inter.length ? inter[0].instanceId : null;
+      if (id !== lastHoverRef.current) {
+        lastHoverRef.current = id;
+        onHoverInstance && onHoverInstance(id, ev);
+      }
+    };
+
+    const onCanvasPointerDown = (ev) => {
+      // if dragging in progress we won't treat as click here
+      if (pointerStateRef.current.dragging) return;
+      const { x, y } = getMouseFromEvent(ev);
+      mouseRef.current.x = x;
+      mouseRef.current.y = y;
+      raycasterRef.current.setFromCamera(mouseRef.current, camera);
+      const mesh = meshRef.current;
+      if (!mesh) return;
+      const inter = raycasterRef.current.intersectObject(mesh, true);
+      const id = inter && inter.length ? inter[0].instanceId : null;
+      if (id != null) {
+        // call click handler as a fallback (if instancedMesh's onPointerDown didn't fire)
+        onClickInstance && onClickInstance(id, ev);
+      }
+    };
+
+    canvas.addEventListener("pointermove", onCanvasPointerMove, {
+      passive: true,
+    });
+    canvas.addEventListener("pointerdown", onCanvasPointerDown);
+    return () => {
+      canvas.removeEventListener("pointermove", onCanvasPointerMove);
+      canvas.removeEventListener("pointerdown", onCanvasPointerDown);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [camera, gl, onHoverInstance, onClickInstance]);
 
-  // helper functions for global pointer events
+  // ---------- keep your existing drag global handlers and useFrame for instance matrices ----------
   const globalPointerMove = (ev) => {
     const ps = pointerStateRef.current;
     if (!ps.dragging || ps.downId == null) return;
@@ -389,17 +456,15 @@ function InstancedNodes({
     const pos = positionsRef.current;
     if (!pos || !meshRef.current) return;
 
-    // update instance transforms
     for (let i = 0; i < pos.length; i++) {
       p.set(pos[i].x, pos[i].y, pos[i].z);
       dummyMat.compose(p, q, new Vector3(size, size, size));
       meshRef.current.setMatrixAt(i, dummyMat);
     }
     meshRef.current.instanceMatrix.needsUpdate = true;
-    // NOTE: we no longer update per-instance colors here
   });
 
-  // pointer handling (click toggles mode; hold+move starts drag)
+  // pointer handling on the instancedMesh (still used for precise pointer capture & drag start)
   const onPointerDown = (e) => {
     e.stopPropagation();
     const id = e.instanceId;
@@ -418,7 +483,7 @@ function InstancedNodes({
     e.stopPropagation();
     const id = e.instanceId;
     if (id == null) {
-      if (onHoverInstance) onHoverInstance(null);
+      // instancedMesh event didn't provide an instanceId; global raycast will handle hover
       return;
     }
     if (onHoverInstance) onHoverInstance(id, e);
@@ -430,9 +495,7 @@ function InstancedNodes({
       const dist2 = dx * dx + dy * dy;
       const THRESH = 6; // pixels
       if (dist2 > THRESH * THRESH) {
-        // start dragging
         ps.dragging = true;
-        // setup drag plane through current node position, facing camera
         const pos = positionsRef.current[id];
         const camDir = new THREE.Vector3();
         camera.getWorldDirection(camDir);
@@ -440,7 +503,6 @@ function InstancedNodes({
           camDir,
           new THREE.Vector3(pos.x, pos.y, pos.z)
         );
-        // attach global listeners
         if (typeof window !== "undefined") {
           window.addEventListener("pointermove", globalPointerMove);
           window.addEventListener("pointerup", globalPointerUp);
@@ -461,10 +523,8 @@ function InstancedNodes({
     if (!ps) return;
     if (ps.downId === id) {
       if (!ps.dragging) {
-        // treat as click toggle
         if (onClickInstance) onClickInstance(id, e);
       } else {
-        // if dragging ended via pointerup on mesh, handle end
         if (onDragEnd) onDragEnd(id, e.point, e);
       }
       ps.downId = null;
@@ -480,6 +540,8 @@ function InstancedNodes({
   };
 
   const onPointerOut = (e) => {
+    // when pointer leaves mesh geometry entirely, clear hover
+    // but we rely primarily on global canvas handler
     if (onHoverInstance) onHoverInstance(null);
   };
 
@@ -657,16 +719,39 @@ function DebugOverlay({ positionsRef, edgesRef, nodeCount }) {
   );
 }
 
+// https://mathoverflow.net/questions/304138/cayley-graph-of-a-5-with-generators-1-2-3-4-5-1-4-3-2-5
+// https://weddslist.com/groups/cayley-plat/index.html
+
 export default function CayleyGraphVisualizer() {
   const [n, setN] = useState(4);
   const [generatorInput, setGeneratorInput] = useState("(1 2),(1 3),(3 4)");
   const [presets] = useState({
-    "S4 polyhedron": { n: 4, gens: ["(1 2)", "(1 3)", "(3 4)"] },
-    "A5 dodecahedron-ish": {
+    "S4 truncated octahedron": { n: 4, gens: ["(1 2)", "(1 3)", "(3 4)"] },
+    "A5 truncated icosahedron": {
       n: 5,
       gens: ["(1 2)(3 4)", "(1 2 3 4 5)", "(5 4 3 2 1)"],
     },
-    "A5 two gens": { n: 5, gens: ["(1 2 3 4 5)", "(1 2 3 5 4)"] },
+    "A5 truncated dodecahedron": {
+      n: 5,
+      gens: ["(1 2 3)", "(1 4)(2 5)"],
+    },
+    "A5 small rhombicosidodecahedron": {
+      n: 5,
+      gens: ["(1 2 3 4 5)", "(2 5 3)"],
+    },
+    "A5 sunb dodecahedron": {
+      n: 5,
+      gens: ["(1 2 3 4 5)", "(2 5 3)", "(1 2)(4 5)"],
+    },
+    "A5 weird two gens": { n: 5, gens: ["(1 2 3 4 5)", "(1 2 3 5 4)"] },
+    "Q8 quaternions in S8": {
+      n: 8,
+      gens: ["(1 3 2 4)(5 7 6 8)", "(1 5 2 6)(3 8 4 7)"],
+    },
+    "D10 dihedral in S10": {
+      n: 10,
+      gens: ["(1 2 3 4 5 6 7 8 9 10)", "(2 10)(3 9)(4 8)(5 7)"],
+    },
   });
   const [selectedPreset, setSelectedPreset] = useState("S4 polyhedron");
 
@@ -679,6 +764,8 @@ export default function CayleyGraphVisualizer() {
   const [showDebugOverlay, setShowDebugOverlay] = useState(false);
   const [showElementList, setShowElementList] = useState(true);
   const [enableRepulsion, setEnableRepulsion] = useState(true);
+  // add this near your other useState declarations:
+  const [composeMode, setComposeMode] = useState("left"); // "right" or "left"
 
   useEffect(() => {
     const p = presets[selectedPreset];
@@ -718,8 +805,8 @@ export default function CayleyGraphVisualizer() {
   }, [generatorNames.length]);
 
   const { nodeObjs, edges } = useMemo(
-    () => buildCayley(n, generators),
-    [n, generators]
+    () => buildCayley(n, generators, composeMode === "left"),
+    [n, generators, composeMode]
   );
   const count = nodeObjs.length;
 
@@ -1073,6 +1160,27 @@ export default function CayleyGraphVisualizer() {
           </button>
         </div>
 
+        <div className="mt-3">
+          <label className="block text-sm">Composition direction</label>
+          <div className="text-xs text-gray-600 mb-1">
+            Choose whether generators are applied on the <strong>right</strong>{" "}
+            (postcompose) or on the <strong>left</strong> (precompose). The
+            current one is so that [54321] with red arrow R = (123) points to
+            [54132], which matches the intuition that R is saying 1 goes to 2, 2
+            goes to 3, 3 goes to 1.
+          </div>
+          <select
+            value={composeMode}
+            onChange={(e) => setComposeMode(e.target.value)}
+            className="w-full mt-1 p-1 border text-sm"
+          >
+            <option value="right">
+              Postcompose (right-multiply) — default
+            </option>
+            <option value="left">Precompose (left-multiply)</option>
+          </select>
+        </div>
+
         <div className="mt-4">
           <div className="font-medium">Generators (legend)</div>
           <div className="mt-2">
@@ -1142,7 +1250,8 @@ export default function CayleyGraphVisualizer() {
           <div>
             <div className="flex items-center justify-between">
               <div className="font-medium mb-2">
-                Elements (verification list)
+                Element list (Read sequences of capital letters left to
+                right!!!)
               </div>
               <button
                 className="cg-toggle-btn text-sm"

@@ -8,13 +8,17 @@ Written completely by ChatGPT, under my guidance/prompting. It works shockingly 
 
 View it at this link [https://codesandbox.io/p/github/danirui/cayleyGraphVisualizer/main](https://codesandbox.io/p/github/danirui/cayleyGraphVisualizer/main). On the right hand side panel, click `Start 3000` and the Preview should open.
 
-Nodes will have labels (may have to wait a bit before they load/appear), unless you don't want them in which case you can hide them.
+Nodes will have labels (may have to wait a bit before they load/appear in the correct places), unless you don't want them in which case you can hide them by toggling a button in the control panel.
 
 The UI is intuitive, self-explanatory. The "physics" engine (jostling, repulsion, springs, etc.) is to evolve the Cayley graph into a nice geometric shape.
 
-Different colored edges now can have different spring tensions. Also, users can now click and drag nodes to different places manually, in case the stochastic jostling is not producing desirable results.
+Different colored edges now can have different spring tensions. Also, users can now hover over (more info appears) and click nodes (color changes to yellow) to (1.) pin in place and (2.) drag nodes to different places manually, in case the stochastic jostling is not producing desirable results.
 
-A sample of some things I asked ChatGPT:
+Small quirk: once you click a node once, the scroll/pan/rotate/zoom capabilities shut off (a side-effect of trying to make it so that dragging a node around doesn't also rotate/pan/scroll the viewing window). But if you click multiple nodes (turning them all yellow --- you may have to lightly drag before you click), and you "unclick" just one of them (also by lightly dragging/throwing it), the scroll/pan/rotate/zoom capabilities come back.
+
+---
+
+A sample of some things I asked ChatGPT (at the very beginning; the later minor tweaks took a lot more back-and-forth):
 
 > in this video [https://www.youtube.com/watch?app=desktop&v=HbEd3Sef13I&ab_channel=WhatisMath%3F](https://www.youtube.com/watch?app=desktop&v=HbEd3Sef13I&ab_channel=WhatisMath%3F) some cayley graphs are depicted. in particular the group G = S_4 and set of generators S = (12), (13), (34)
 > and G = A_5 and set of generators S = (12)(34), (12345), (54321)
@@ -34,5 +38,5 @@ A sample of some things I asked ChatGPT:
 > etc.
 
 > The next step is to visualize it. One idea is to plot in 3d, and have springs on the edges with strengths that the user can manipulate on a slide perhaps, + jostling whose strength the user can also manipulate, that will stretch and pull the abstract graph into a stable 3D configuration. this should play as a live animation, where again the user can change things on slides for example and see it reflected in the animation.
->
+
 > it may help to look over this website [https://juliapoo.github.io/mathematics/2023/07/15/plotting-cayley-graphs.html](https://juliapoo.github.io/mathematics/2023/07/15/plotting-cayley-graphs.html) and its source code [https://github.com/JuliaPoo/Cayley-Graph-Plotting](https://github.com/JuliaPoo/Cayley-Graph-Plotting) for inspiration. in particular, nice features are arrows on the edges, labels on edge corresponding to an element of S, Julia's smooth animations. dragging around mouse rotates, scrolling zooms
