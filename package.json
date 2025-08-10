@@ -5,16 +5,17 @@
   "keywords": [],
   "main": "src/index.tsx",
   "dependencies": {
+    "@react-three/drei": "10.6.1",
+    "@react-three/fiber": "9.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-scripts": "^5.0.0",
-    "@react-three/fiber": "9.3.0",
-    "three": "0.179.1",
-    "@react-three/drei": "10.6.1"
+    "three": "0.179.1"
   },
   "devDependencies": {
     "@types/react": "19.0.0",
     "@types/react-dom": "19.0.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "loader-utils": "3.2.1",
     "typescript": "5.7.2"
   },

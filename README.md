@@ -12,6 +12,8 @@ Nodes will have labels (may have to wait a bit before they load/appear), unless 
 
 The UI is intuitive, self-explanatory. The "physics" engine (jostling, repulsion, springs, etc.) is to evolve the Cayley graph into a nice geometric shape.
 
+Different colored edges now can have different spring tensions. Also, users can now click and drag nodes to different places manually, in case the stochastic jostling is not producing desirable results.
+
 A sample of some things I asked ChatGPT:
 
 > in this video [https://www.youtube.com/watch?app=desktop&v=HbEd3Sef13I&ab_channel=WhatisMath%3F](https://www.youtube.com/watch?app=desktop&v=HbEd3Sef13I&ab_channel=WhatisMath%3F) some cayley graphs are depicted. in particular the group G = S_4 and set of generators S = (12), (13), (34)
